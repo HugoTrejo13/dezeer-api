@@ -11,6 +11,17 @@ provider "aws" {
   region = "us-east-2"
 }
 
+variable "alert_email" {
+  description = "Correo que recibe las alertas de errores"
+  type        = string
+}
+
+variable "deezer_url" {
+  description = "URL base de la API de Deezer; cambiarla simula que Deezer se cae"
+  type        = string
+  default     = "https://api.deezer.com"
+}
+
 resource "aws_iam_role" "onda" {
   name = "onda-lambda-role"
   assume_role_policy = jsonencode({
@@ -36,8 +47,12 @@ resource "aws_lambda_function" "onda" {
   memory_size      = 256
   timeout          = 15
   role             = aws_iam_role.onda.arn
-  filename         = "${path.module}/../docs/onda-lambda.zip"
-  source_code_hash = filebase64sha256("${path.module}/../docs/onda-lambda.zip")
+  filename         = "${path.module}/../dist/onda-lambda.zip"
+  source_code_hash = filebase64sha256("${path.module}/../dist/onda-lambda.zip")
+
+  environment {
+    variables = { DEEZER_URL = var.deezer_url }
+  }
 
   depends_on = [aws_iam_role_policy_attachment.logs]
 }

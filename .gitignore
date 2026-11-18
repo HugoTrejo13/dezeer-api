@@ -33,5 +33,3 @@ crash.*.log
 # Build artifacts
 dist/
 build/
-
-.env.example

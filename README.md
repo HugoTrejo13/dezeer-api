@@ -10,16 +10,13 @@ Hecha con FastAPI (Python) en el backend y Tailwind con Alpine.js en la interfaz
 
 ## 2. Cómo funciona en AWS
 
-```
-Navegador ──► Function URL ──► AWS Lambda (main.py) ──► API de Deezer
-```
+![Arquitectura](docs/arquitectura.svg)
 
-La app corre en **AWS Lambda**: solo se ejecuta cuando alguien entra y se accede con un link público (**Function URL**). Toda la infraestructura está escrita con **Terraform** en `terraform/main.tf`, así que se crea y actualiza con comandos en lugar de usar la consola de AWS.
+La app corre en **AWS Lambda**: solo se ejecuta cuando alguien entra y se accede con un link público (**Function URL**). Si la app empieza a fallar, una alarma de **CloudWatch** lo detecta y **SNS** avisa por correo.
 
-```bash
-terraform/build.sh                        # empaqueta el código en docs/onda-lambda.zip
-terraform -chdir=terraform apply          # lo sube y crea todo en AWS
-```
+Toda la infraestructura está escrita con **Terraform** en `terraform/`, y `terraform/deploy.sh` la crea o actualiza con un solo comando, sin usar la consola de AWS.
+
+Documentación completa: [docs/documentacion.md](docs/documentacion.md).
 
 ## 3. Cómo tenerlo en tu computadora
 
@@ -43,22 +40,31 @@ Abre `http://localhost:8000` para la app y `http://localhost:8000/docs` para los
 
 ### Desplegarlo en tu propia cuenta de AWS
 
-Antes haz los pasos de "Correrlo en local": `build.sh` usa el `.venv` que se crea ahí.
-
 ```bash
-aws login                                 # o: aws configure
-terraform -chdir=terraform init           # descarga el proveedor de AWS
-terraform/build.sh                        # genera el zip
-terraform -chdir=terraform apply          # escribe "yes" para confirmar
-terraform -chdir=terraform output url     # tu link
+aws login                                                  # o: aws configure
+cp terraform/terraform.tfvars.example terraform/terraform.tfvars
+# edita terraform/terraform.tfvars y pon tu correo para las alertas
+terraform/deploy.sh                                        # empaqueta y crea todo; escribe "yes"
+terraform -chdir=terraform output url                      # tu link
 ```
+
+Después confirma la suscripción en el correo que te manda AWS; sin eso no llegan las alertas.
 
 Como `terraform.tfstate` no está en el repositorio, Terraform crea recursos nuevos en tu cuenta. El estado se guarda en tu computadora, en `terraform/terraform.tfstate`.
 
 ### Actualizar después de cambiar el código
 
 ```bash
-terraform/build.sh && terraform -chdir=terraform apply
+terraform/deploy.sh
+```
+
+### Probar la resiliencia
+
+```bash
+.venv/bin/python tests/resiliencia.py URL                                # app normal
+terraform/deploy.sh -var deezer_url=https://api.deezer.invalid           # simula que Deezer se cae
+.venv/bin/python tests/resiliencia.py URL --falla                        # errores controlados y alarma
+terraform/deploy.sh                                                      # vuelve a la normalidad
 ```
 
 ### Borrar todo de AWS

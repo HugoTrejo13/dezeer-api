@@ -1,3 +1,6 @@
+import os
+import time
+
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -5,9 +8,16 @@ from fastapi.staticfiles import StaticFiles
 from mangum import Mangum
 
 app = FastAPI(title="Onda")
-# 
-#
-deezer = httpx.Client(base_url="https://api.deezer.com", timeout=10)
+deezer = httpx.Client(
+    base_url=os.getenv("DEEZER_URL", "https://api.deezer.com"),  # cambiarla simula que Deezer se cae
+    timeout=10,
+    transport=httpx.HTTPTransport(retries=2),  # reintenta si falla la conexión
+)
+
+# Copias de las respuestas de Deezer; viven mientras la instancia de Lambda siga activa
+cache: dict[str, tuple[float, dict]] = {}
+FRESH = 300  # segundos que una copia se usa sin volver a preguntar a Deezer
+BUSY = {4, 700}  # QUOTA y SERVICE_BUSY en la documentación de Deezer
 
 
 @app.exception_handler(httpx.HTTPError)
@@ -16,14 +26,29 @@ def deezer_down(request: Request, exc: httpx.HTTPError):
 
 
 def get(path: str, **params) -> dict:
-    data = deezer.get(path, params=params).raise_for_status().json()
+    key = f"{path}?{sorted(params.items())}"
+    saved = cache.get(key)
+    if saved and time.time() - saved[0] < FRESH:
+        return saved[1]
+    try:
+        data = deezer.get(path, params=params).raise_for_status().json()
+        if data.get("error", {}).get("code") in BUSY:
+            raise httpx.HTTPError(data["error"].get("message", "Deezer saturado"))
+    except httpx.HTTPError as exc:
+        if not saved:
+            raise
+        print(f"Deezer falló ({exc}); se usa la copia guardada de {key}")
+        return saved[1]
     if error := data.get("error"):
         raise HTTPException(404 if error.get("code") == 800 else 502, error.get("message"))
+    cache.pop(key, None)
+    if len(cache) >= 200:
+        cache.pop(next(iter(cache)))  # se va la copia más vieja
+    cache[key] = (time.time(), data)
     return data
 
 
 def tracks(items: list[dict]) -> list[dict]:
-    # 
     return [
         {
             "id": t["id"],
